@@ -56,6 +56,8 @@ class Server(object):
         self.wifi_if = wifi_if
         self.wifi_name = wifi_name
 
+        self.nmcli_version = None
+
         self.wifi_if_present = True
         try:
             subprocess.check_call(['ifconfig', self.wifi_if])
@@ -65,13 +67,19 @@ class Server(object):
 
         # Make sure it's safe to run nmcli
         if wifi_free:
+            #Lets try and check if nmcli is present and if so, get the nmcli version
             try:
-                subprocess.check_call(['nmcli', 'nm', 'status'])
+                self.nmcli_version = subprocess.check_output(['nmcli', '--version']).split()[-1]
             except OSError as e:
                 self.logger.warn("Couldn't run nmcli (%s): %s", e.filename,
                                  e.message)
                 self.logger.warn("Disabling NetworkManager compatibility.")
                 wifi_free = False
+                return # We can't find nmcli, just return out of this if
+
+            # Now that we got the verison number, issue the correct command.
+            try:
+                subprocess.check_call(['nmcli', self._nmcli_status_command(self.nmcli_version), 'status'])
             except subprocess.CalledProcessError as e:
                 self.logger.warn("Error during test run of nmcli: %s", e.message)
                 self.logger.warn("Disabling NetworkManager compatibility.")
@@ -127,6 +135,22 @@ class Server(object):
         # this mutex
         self.mutex = threading.RLock()
 
+    def _nmcli_status_command(self, version):
+        if (self._vercmp(version, "0.9.9.0") >= 0):
+            return 'g'
+        else
+            return 'nm'
+
+    def _nmcli_wifi_command(self, version):
+        if (self._vercmp(version, "0.9.9.0") >= 0):
+            return 'radio'
+        else
+            return 'nm'
+
+    def _vercmp(self, actual, test):
+        def normalize(v):
+            return [int(x) for x in re.sub(r'(\.0+)*$', '', v).split(".")]
+        return cmp(normalize(actual), normalize(test))  
 
     def _link_monitor(self, interval=10, callback=None):
         former_link, reachable_devs = has_link()
@@ -223,7 +247,7 @@ class Server(object):
 
     def free_wifi(self):
         if self.wifi_free:
-            subprocess.check_call(['nmcli', 'nm', 'wifi', 'off'])
+            subprocess.check_call(['nmcli', self._nmcli_wifi_command(self.nmcli_version), 'wifi', 'off'])
             subprocess.check_call(['rfkill', 'unblock', 'wlan'])
 
     def reset_wifi(self):
